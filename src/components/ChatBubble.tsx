@@ -16,7 +16,7 @@ export function ChatBubble({ message }: ChatBubbleProps) {
   return (
     <div className={`flex gap-2 mb-4 ${isAgent ? 'justify-start' : 'justify-end'}`}>
       {isAgent && (
-        <div className="w-8 h-8 rounded-full bg-[#0088cc] flex items-center justify-center flex-shrink-0">
+        <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
           <Bot className="w-5 h-5 text-white" />
         </div>
       )}
@@ -24,7 +24,7 @@ export function ChatBubble({ message }: ChatBubbleProps) {
       <div
         className={`max-w-[70%] px-4 py-2 rounded-[18px] shadow-sm ${
           isAgent
-            ? 'bg-[#0088cc] text-white'
+            ? 'bg-blue-500 text-white'
             : 'bg-white text-black border border-gray-200'
         }`}
       >
@@ -37,7 +37,7 @@ export function ChatBubble({ message }: ChatBubbleProps) {
       </div>
 
       {!isAgent && (
-        <div className="w-8 h-8 rounded-full bg-[#31a24c] flex items-center justify-center flex-shrink-0">
+        <div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center flex-shrink-0">
           <User className="w-5 h-5 text-white" />
         </div>
       )}

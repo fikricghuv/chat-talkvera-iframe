@@ -40,10 +40,16 @@ export function ChatInterface() {
         }
       }
 
+      // Ambil sender_id dari localStorage
+      const storedSenderId = getSenderId();
+
       const currentOffset = isInitial ? 0 : offset;
+      
+      // Filter berdasarkan sender_id dari localStorage
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
+        .eq('sender_id', storedSenderId) // Filter by sender_id
         .order('created_at', { ascending: false })
         .range(currentOffset, currentOffset + MESSAGES_PER_PAGE - 1);
 
