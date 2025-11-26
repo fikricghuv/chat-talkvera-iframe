@@ -1,0 +1,29 @@
+services:
+  talkvera-iframe:
+    build: .
+    container_name: talkvera-iframe
+    labels:
+      traefik.enable: "true"
+
+      # root domain (menggunakan variabel dari .env)
+      traefik.http.routers.talkvera-iframe.entrypoints: websecure
+      traefik.http.routers.talkvera-iframe.rule: Host(`chat.${ROOT_DOMAIN}`)
+      traefik.http.routers.talkvera-iframe.service: talkvera
+      traefik.http.routers.talkvera-iframe.tls.certresolver: mytlschallenge
+
+      # www (dibuat secara dinamis dari variabel)
+      traefik.http.routers.talkvera-iframe-www.entrypoints: websecure
+      traefik.http.routers.talkvera-iframe-www.rule: Host(`www.chat.${ROOT_DOMAIN}`)
+      traefik.http.routers.talkvera-iframe-www.service: talkvera
+      traefik.http.routers.talkvera-iframe-www.tls.certresolver: mytlschallenge
+
+      traefik.http.services.talkvera-iframe.loadbalancer.server.port: "80"
+    expose:
+      - "80"
+    restart: always
+    networks:
+      - default
+networks:
+  default:
+    external: true
+    name: root_default
