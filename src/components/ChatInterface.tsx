@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Bot } from 'lucide-react';
 import { supabase, ChatMessage } from '../lib/supabase';
 import { getSenderId } from '../utils/senderId';
 import { sendMessageToN8n } from '../services/n8nWebhook';
 import { ChatHeader } from './ChatHeader';
 import { ChatBubble } from './ChatBubble';
 import { ChatInput } from './ChatInput';
+import { updateMessageFeedback } from '../lib/supabase';
+import { FeedbackModal } from './FeedbackModal'; 
 
 const MESSAGES_PER_PAGE = 10;
 
@@ -17,11 +19,17 @@ export function ChatInterface() {
   const [offset, setOffset] = useState(0);
   const [senderId] = useState(() => getSenderId());
   const [sending, setSending] = useState(false);
+  const [waitingForAgent, setWaitingForAgent] = useState(false);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const scrollPositionRef = useRef<number>(0);
   const isInitialLoadRef = useRef(true);
   const lastMessageCountRef = useRef(0);
+  const isSubscribedRef = useRef(false);
+
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [selectedFeedbackType, setSelectedFeedbackType] = useState<'like' | 'dislike' | null>(null);
 
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
@@ -40,16 +48,13 @@ export function ChatInterface() {
         }
       }
 
-      // Ambil sender_id dari localStorage
       const storedSenderId = getSenderId();
-
       const currentOffset = isInitial ? 0 : offset;
       
-      // Filter berdasarkan sender_id dari localStorage
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
-        .eq('sender_id', storedSenderId) // Filter by sender_id
+        .eq('sender_id', storedSenderId)
         .order('created_at', { ascending: false })
         .range(currentOffset, currentOffset + MESSAGES_PER_PAGE - 1);
 
@@ -76,6 +81,59 @@ export function ChatInterface() {
     }
   };
 
+  const handleFeedback = (messageId: string, feedbackType: 'like' | 'dislike') => {
+    setSelectedMessageId(messageId);
+    setSelectedFeedbackType(feedbackType);
+    setShowFeedbackModal(true);
+  };
+
+  // Handler ketika modal di-submit
+  const handleModalSubmit = async (feedbackText: string) => {
+    if (!selectedMessageId || !selectedFeedbackType) return;
+
+    try {
+      // Update ke database
+      await updateMessageFeedback(
+        selectedMessageId, 
+        selectedFeedbackType,
+        feedbackText || null
+      );
+      
+      // Update local state
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === selectedMessageId 
+            ? { 
+                ...msg, 
+                feedback: selectedFeedbackType,
+                feedback_text: feedbackText || null
+              } 
+            : msg
+        )
+      );
+      
+      console.log('Feedback saved:', {
+        messageId: selectedMessageId,
+        feedback: selectedFeedbackType,
+        feedbackText: feedbackText || '(no text)'
+      });
+    } catch (error) {
+      console.error('Error updating feedback:', error);
+    } finally {
+      // Close modal
+      setShowFeedbackModal(false);
+      setSelectedMessageId(null);
+      setSelectedFeedbackType(null);
+    }
+  };
+
+  // Handler ketika modal di-close
+  const handleModalClose = () => {
+    setShowFeedbackModal(false);
+    setSelectedMessageId(null);
+    setSelectedFeedbackType(null);
+  };
+
   const handleScroll = useCallback(() => {
     if (!chatContainerRef.current || loadingMore || !hasMore) return;
 
@@ -87,50 +145,133 @@ export function ChatInterface() {
   const sendMessage = async (messageText: string) => {
     try {
       setSending(true);
+      setWaitingForAgent(true);
 
       const createdAt = new Date().toISOString();
 
-      const newMessage: Omit<ChatMessage, 'id'> = {
-        sender_id: senderId,
-        role: 'user',
-        message: messageText,
-        created_at: createdAt,
-      };
-
-      const optimisticMessage: ChatMessage = {
-        ...newMessage,
-        id: `temp-${Date.now()}`,
-      };
-
-      setMessages((prev) => [...prev, optimisticMessage]);
-
-      const { error } = await supabase.from('chat_messages').insert([
-        {
-          sender_id: senderId,
-          role: 'user',
-          message: messageText,
-        },
-      ]);
+      // Insert pesan user ke database
+      const { data: insertedData, error } = await supabase
+        .from('chat_messages')
+        .insert([
+          {
+            sender_id: senderId,
+            role: 'user',
+            message: messageText,
+          },
+        ])
+        .select()
+        .single();
 
       if (error) throw error;
 
-      await sendMessageToN8n({
-        sender_id: senderId,
-        role: 'user',
-        message: messageText,
-        created_at: createdAt,
-      });
+      // Tambahkan pesan user ke state secara langsung
+      if (insertedData) {
+        setMessages((prev) => [...prev, insertedData as ChatMessage]);
+      }
 
-      await loadMessages(true);
+      // Kirim ke N8N webhook dan tunggu response
+      const n8nUrl = import.meta.env.VITE_N8N_WEBHOOK_URL;
+      
+      if (n8nUrl) {
+        const response = await fetch(n8nUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sender_id: senderId,
+            role: 'user',
+            message: messageText,
+            created_at: createdAt,
+          }),
+        });
+
+        if (response.ok) {
+          const agentResponses = await response.json();
+          
+          // N8N mengembalikan array of messages
+          if (Array.isArray(agentResponses) && agentResponses.length > 0) {
+            // Insert response agent ke database DULU
+            const agentMessagesToInsert = agentResponses.map((msg: any) => ({
+              sender_id: senderId,
+              role: 'agent',
+              message: msg.message,
+              created_at: msg.created_at || new Date().toISOString(),
+            }));
+
+            const { data: insertedAgentMessages, error: agentError } = await supabase
+              .from('chat_messages')
+              .insert(agentMessagesToInsert)
+              .select();
+
+            if (agentError) {
+              console.error('Error inserting agent messages:', agentError);
+            } else if (insertedAgentMessages) {
+              // Tambahkan ke state setelah berhasil insert ke database
+              setMessages((prev) => [...prev, ...insertedAgentMessages as ChatMessage[]]);
+            }
+          }
+        } else {
+          console.error('N8N webhook error:', response.status, response.statusText);
+        }
+      }
+
+      setWaitingForAgent(false);
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages((prev) => prev.filter((msg) => !msg.id.startsWith('temp-')));
+      setWaitingForAgent(false);
     } finally {
       setSending(false);
     }
   };
 
+  // Real-time subscription untuk pesan baru dari agent
   useEffect(() => {
+    const storedSenderId = getSenderId();
+
+    // Hindari multiple subscription
+    if (isSubscribedRef.current) return;
+    isSubscribedRef.current = true;
+
+    const subscription = supabase
+      .channel('chat_messages_channel')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `sender_id=eq.${storedSenderId}`,
+        },
+        (payload) => {
+          const newMessage = payload.new as ChatMessage;
+          
+          // Hanya tambahkan jika pesan dari agent
+          // Pesan user sudah ditambahkan langsung di sendMessage()
+          if (newMessage.role === 'agent') {
+            setMessages((prev) => {
+              // Cek apakah pesan sudah ada (hindari duplikasi)
+              const exists = prev.some(msg => msg.id === newMessage.id);
+              if (exists) return prev;
+              
+              return [...prev, newMessage];
+            });
+            
+            // Hide animasi typing ketika agent response diterima
+            setWaitingForAgent(false);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+      isSubscribedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Load messages dari database saat pertama kali
     loadMessages(true);
   }, []);
 
@@ -173,13 +314,41 @@ export function ChatInterface() {
         ) : (
           <div>
             {messages.map((message) => (
-              <ChatBubble key={message.id} message={message} />
+              <ChatBubble 
+                key={message.id} 
+                message={message}
+                onFeedback={handleFeedback}
+              />
             ))}
+            
+            {/* Loading indicator saat menunggu response agent */}
+            {waitingForAgent && (
+              <div className="flex items-start gap-2 mb-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <div className="bg-blue-500 text-white rounded-[18px] px-4 py-3 shadow-sm max-w-[70%]">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-blue-100 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-blue-100 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-blue-100 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <ChatInput onSendMessage={sendMessage} disabled={sending} />
+      {selectedFeedbackType && (
+        <FeedbackModal
+          isOpen={showFeedbackModal}
+          feedbackType={selectedFeedbackType}
+          onClose={handleModalClose}
+          onSubmit={handleModalSubmit}
+        />
+      )}
     </div>
   );
 }
