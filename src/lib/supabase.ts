@@ -1,3 +1,4 @@
+// lib/supabase.ts
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -5,32 +6,38 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Updated ChatMessage type untuk table baru
 export interface ChatMessage {
   id: string;
-  sender_id: string;
+  client_id: string;
+  session_id: string;
   role: 'agent' | 'user';
   message: string;
   created_at: string;
   feedback?: 'like' | 'dislike' | null;
-  feedback_text?: string | null; // Field baru untuk teks feedback
+  feedback_text?: string | null;
 }
 
-// Fungsi untuk update feedback beserta teks opsionalnya
+// Updated function untuk update feedback di table baru
 export async function updateMessageFeedback(
-  messageId: string, 
-  feedback: 'like' | 'dislike' | null,
-  feedbackText?: string | null
+  messageId: string,
+  feedback: 'like' | 'dislike',
+  feedbackText: string | null
 ) {
   const { data, error } = await supabase
-    .from('chat_messages')
-    .update({ 
+    .from('dt_lp_chat_messages')
+    .update({
       feedback,
-      feedback_text: feedbackText || null 
+      feedback_text: feedbackText,
     })
     .eq('id', messageId)
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error('Error updating feedback:', error);
+    throw error;
+  }
+
   return data;
 }
