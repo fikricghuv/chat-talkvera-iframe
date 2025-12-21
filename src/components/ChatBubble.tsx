@@ -1,10 +1,13 @@
-import { User, Bot, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { User, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { ChatMessage } from '../lib/supabase';
 
 interface ChatBubbleProps {
   message: ChatMessage;
   onFeedback?: (messageId: string, feedback: 'like' | 'dislike') => void;
 }
+
+// Gunakan path yang sama dengan di Header
+const VERA_IMAGE_URL = "/assets/profile-vera.png";
 
 export function ChatBubble({ message, onFeedback }: ChatBubbleProps) {
   const isAgent = message.role === 'agent';
@@ -22,8 +25,16 @@ export function ChatBubble({ message, onFeedback }: ChatBubbleProps) {
   return (
     <div className={`flex gap-2 mb-3 sm:mb-4 ${isAgent ? 'justify-start' : 'justify-end'}`}>
       {isAgent && (
-        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-          <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white flex items-center justify-center flex-shrink-0 overflow-hidden shadow-sm border border-gray-100">
+          <img 
+            src={VERA_IMAGE_URL} 
+            alt="Vera" 
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              // Fallback jika image gagal load
+              (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=V&background=3B82F6&color=fff';
+            }}
+          />
         </div>
       )}
 
@@ -80,7 +91,7 @@ export function ChatBubble({ message, onFeedback }: ChatBubbleProps) {
       </div>
 
       {!isAgent && (
-        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-cyan-500 flex items-center justify-center flex-shrink-0">
+        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-cyan-500 flex items-center justify-center flex-shrink-0 shadow-sm">
           <User className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
         </div>
       )}
