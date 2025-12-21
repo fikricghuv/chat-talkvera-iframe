@@ -29,10 +29,10 @@ export function ChatBubble({ message, onFeedback }: ChatBubbleProps) {
 
       <div className="flex flex-col gap-1 max-w-[75%] sm:max-w-[70%]">
         <div
-          className={`px-3 py-2 sm:px-4 rounded-[18px] shadow-sm ${
+          className={`px-3 py-2 sm:px-4 shadow-sm ${
             isAgent
-              ? 'bg-blue-500 text-white'
-              : 'bg-white text-black border border-gray-200'
+              ? 'bg-blue-500 text-white rounded-[18px] rounded-tl-[4px]'
+              : 'bg-white text-black border border-gray-200 rounded-[18px] rounded-tr-[4px]'
           }`}
         >
           <div className="text-[13px] sm:text-sm leading-relaxed whitespace-pre-wrap break-words">
