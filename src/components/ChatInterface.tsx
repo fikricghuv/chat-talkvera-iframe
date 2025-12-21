@@ -361,7 +361,7 @@ export function ChatInterface() {
         
         const headers = {
           'Content-Type': 'application/json',
-          'X-API-Key': authToken,
+          'X-Api-Key': authToken,
           'X-Signature': signatureHex,
         };
         
