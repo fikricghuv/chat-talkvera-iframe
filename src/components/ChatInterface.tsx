@@ -12,7 +12,7 @@ const MESSAGES_PER_PAGE = 10;
 
 export function ChatInterface() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // 🔥 UBAH: Default false karena tidak load saat mount
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
@@ -27,7 +27,7 @@ export function ChatInterface() {
   const lastMessageCountRef = useRef(0);
   const isSubscribedRef = useRef(false);
   
-  // 🔥 TAMBAHAN: Ref untuk prevent double session creation
+  // Ref untuk prevent double session creation
   const sessionCreationInProgressRef = useRef(false);
   const sessionCreationPromiseRef = useRef<Promise<string> | null>(null);
 
@@ -80,7 +80,7 @@ export function ChatInterface() {
           .eq('source', 'landing_page')
           .order('created_at', { ascending: false })
           .limit(1)
-          .maybeSingle(); // 🔥 Gunakan maybeSingle() instead of single()
+          .maybeSingle();
 
         if (sessionCheckError) {
           throw sessionCheckError;
@@ -147,6 +147,7 @@ export function ChatInterface() {
     return sessionPromise;
   };
 
+  // 🔥 FIXED: loadMessages hanya load jika sudah ada sessionId
   const loadMessages = async (isInitial = false) => {
     try {
       if (isInitial) {
@@ -158,8 +159,13 @@ export function ChatInterface() {
         }
       }
 
-      // Dapatkan session_id terlebih dahulu
-      const currentSessionId = await getOrCreateSession();
+      // 🔥 PERBAIKAN: Hanya load jika sudah ada sessionId
+      if (!sessionId) {
+        console.log('⏭️ No session yet, skipping message load');
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
 
       const currentOffset = isInitial ? 0 : offset;
       
@@ -167,7 +173,7 @@ export function ChatInterface() {
       const { data, error } = await supabase
         .from('dt_lp_chat_messages')
         .select('*')
-        .eq('session_id', currentSessionId)
+        .eq('session_id', sessionId)
         .order('created_at', { ascending: false })
         .range(currentOffset, currentOffset + MESSAGES_PER_PAGE - 1);
 
@@ -194,12 +200,13 @@ export function ChatInterface() {
     }
   };
 
+  // 🔥 FIXED: refreshLatestMessages skip jika belum ada sessionId
   const refreshLatestMessages = async () => {
     try {
       console.log('🔄 Refreshing latest messages...');
       
       if (!sessionId) {
-        console.warn('⚠️ No session ID available, cannot refresh');
+        console.warn('⏭️ No session ID, skipping refresh');
         return;
       }
       
@@ -285,13 +292,14 @@ export function ChatInterface() {
     }
   }, [loadingMore, hasMore, offset, sessionId]);
 
+  // 🔥 FIXED: sendMessage - Session dibuat di sini saat user kirim chat pertama
   const sendMessage = async (messageText: string) => {
     try {
       setSending(true);
 
       const createdAt = new Date().toISOString();
 
-      // Dapatkan atau buat session (dengan protection dari double creation)
+      // 🔥 PENTING: Session baru dibuat saat user kirim chat pertama kali
       const currentSessionId = await getOrCreateSession();
 
       // Insert pesan user ke database
@@ -507,22 +515,8 @@ export function ChatInterface() {
     };
   }, [sessionId, scrollToBottom]);
 
-  // 🔥 FIXED: Initial load dengan cleanup
-  useEffect(() => {
-    let isMounted = true;
-    
-    const initializeChat = async () => {
-      if (isMounted) {
-        await loadMessages(true);
-      }
-    };
-    
-    initializeChat();
-    
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  // 🔥 REMOVED: Initial load useEffect - tidak perlu load messages saat mount
+  // Component akan mulai kosong sampai user kirim chat pertama
 
   // Auto-scroll effects
   useEffect(() => {
@@ -571,6 +565,15 @@ export function ChatInterface() {
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-8 h-8 text-gray-500 animate-spin" />
           </div>
+        ) : messages.length === 0 ? (
+          // 🔥 TAMBAHAN: Empty state untuk chat kosong
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center text-gray-400">
+              <Bot className="w-16 h-16 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium">Start a conversation</p>
+              <p className="text-sm mt-2">Send a message to begin chatting</p>
+            </div>
+          </div>
         ) : (
           <div>
             {messages.map((message) => (
@@ -582,15 +585,33 @@ export function ChatInterface() {
             ))}
             
             {waitingForAgent && (
-              <div className="flex items-start gap-2 mb-4">
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white" />
+              <div className="flex gap-2 mb-3 sm:mb-4 justify-start animate-in fade-in duration-300">
+                {/* Avatar Agent */}
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white flex items-center justify-center flex-shrink-0 overflow-hidden shadow-sm border border-gray-100">
+                  <img 
+                    src="/assets/profile-vera.png" 
+                    alt="Vera" 
+                    className="w-full h-full object-cover"
+                  />
                 </div>
-                <div className="bg-blue-500 text-white rounded-[18px] px-4 py-3 shadow-sm max-w-[70%]">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-blue-100 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-blue-100 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-blue-100 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+
+                <div className="flex flex-col gap-1 max-w-[75%] sm:max-w-[70%]">
+                  {/* Bubble Loading */}
+                  <div className="bg-blue-500 px-3 py-2 sm:px-4 sm:py-3 shadow-sm rounded-[18px] rounded-tl-[4px] w-fit">
+                    <div className="flex gap-1.5 items-center h-5">
+                      <div 
+                        className="w-1.5 h-1.5 bg-blue-100 rounded-full animate-bounce" 
+                        style={{ animationDelay: '0ms' }}
+                      ></div>
+                      <div 
+                        className="w-1.5 h-1.5 bg-blue-100 rounded-full animate-bounce" 
+                        style={{ animationDelay: '150ms' }}
+                      ></div>
+                      <div 
+                        className="w-1.5 h-1.5 bg-blue-100 rounded-full animate-bounce" 
+                        style={{ animationDelay: '300ms' }}
+                      ></div>
+                    </div>
                   </div>
                 </div>
               </div>
