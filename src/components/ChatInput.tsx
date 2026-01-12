@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 
 interface ChatInputProps {
@@ -6,70 +6,112 @@ interface ChatInputProps {
   disabled?: boolean;
 }
 
-const MAX_CHARACTERS = 500;
-
 export function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
   const [message, setMessage] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSubmit = (e: FormEvent) => {
+  // 🔥 FIX: Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    // Reset height untuk recalculate
+    textarea.style.height = 'auto';
+    
+    // Set new height berdasarkan content (max 120px ~ 5 lines)
+    const newHeight = Math.min(textarea.scrollHeight, 120);
+    textarea.style.height = `${newHeight}px`;
+  }, [message]);
+
+  // 🔥 FIX: Prevent zoom on focus (iOS Safari)
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const handleFocus = () => {
+      // Scroll input ke view tanpa zoom
+      setTimeout(() => {
+        textarea.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'nearest',
+          inline: 'nearest'
+        });
+      }, 300);
+    };
+
+    textarea.addEventListener('focus', handleFocus);
+    
+    return () => {
+      textarea.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (message.trim() && !disabled && message.length <= MAX_CHARACTERS) {
+    
+    if (message.trim() && !disabled) {
       onSendMessage(message.trim());
       setMessage('');
+      
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = e.target.value;
-    // Hanya update jika belum melebihi limit
-    if (newValue.length <= MAX_CHARACTERS) {
-      setMessage(newValue);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Submit on Enter (tapi bukan Shift+Enter)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
     }
   };
-
-  const remainingChars = MAX_CHARACTERS - message.length;
-  const isNearLimit = remainingChars <= 50;
-  const isAtLimit = remainingChars === 0;
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="bg-white px-4 py-3 border-t border-gray-200"
-    >
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={message}
-          onChange={handleChange}
-          placeholder="Type a message..."
-          disabled={disabled}
-          className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0088cc] disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={!message.trim() || disabled || message.length > MAX_CHARACTERS}
-          className="w-10 h-10 rounded-full bg-[#0088cc] text-white flex items-center justify-center hover:bg-[#0077b6] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Send className="w-5 h-5" />
-        </button>
-      </div>
-      
-      {/* Character counter - hanya muncul saat mengetik atau mendekati limit */}
-      {message.length > 0 && (
-        <div className="flex justify-end mt-1 px-2">
-          <span
-            className={`text-xs transition-colors ${
-              isAtLimit
-                ? 'text-red-500 font-semibold'
-                : isNearLimit
-                ? 'text-orange-500'
-                : 'text-gray-400'
-            }`}
+    <div className="border-t border-gray-200 bg-white">
+      <form onSubmit={handleSubmit} className="p-4">
+        <div className="flex gap-2 items-center">
+          <div className="flex-1 relative">
+            <textarea
+              ref={textareaRef}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ketik pesan..."
+              disabled={disabled}
+              rows={1}
+              className="w-full px-4 py-3 pr-12 rounded-2xl border border-gray-300 
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                       resize-none overflow-y-auto
+                       disabled:bg-gray-100 disabled:cursor-not-allowed"
+              style={{
+                minHeight: '48px',
+                maxHeight: '120px',
+                // 🔥 CRITICAL: Prevent zoom on iOS
+                fontSize: '16px', // Must be >= 16px to prevent zoom!
+                lineHeight: '1.5',
+                // 🔥 Prevent text selection zoom
+                WebkitTapHighlightColor: 'transparent',
+                // 🔥 Prevent auto-zoom
+                WebkitTextSizeAdjust: '100%'
+              }}
+            />
+          </div>
+          
+          <button
+            type="submit"
+            disabled={!message.trim() || disabled}
+            className="flex-shrink-0 p-3 rounded-full bg-blue-500 text-white 
+                     hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed
+                     transition-colors duration-200
+                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            aria-label="Send message"
           >
-            {remainingChars} / {MAX_CHARACTERS}
-          </span>
+            <Send className="w-5 h-5" />
+          </button>
         </div>
-      )}
-    </form>
+      </form>
+    </div>
   );
 }

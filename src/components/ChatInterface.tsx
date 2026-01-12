@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Bot } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { supabase, ChatMessage } from '../lib/supabase';
 import { getSenderId } from '../utils/senderId';
 import { ChatHeader } from './ChatHeader';
 import { ChatBubble } from './ChatBubble';
 import { ChatInput } from './ChatInput';
 import { updateMessageFeedback } from '../lib/supabase';
-import { FeedbackModal } from './FeedbackModal'; 
+import { FeedbackModal } from './FeedbackModal';
 
 const MESSAGES_PER_PAGE = 10;
 
@@ -27,15 +27,54 @@ export function ChatInterface() {
   const lastMessageCountRef = useRef(0);
   const isSubscribedRef = useRef(false);
   
-  // 🔥 TAMBAHAN: Ref untuk prevent double session creation
   const sessionCreationInProgressRef = useRef(false);
   const sessionCreationPromiseRef = useRef<Promise<string> | null>(null);
 
+  const waitingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [selectedFeedbackType, setSelectedFeedbackType] = useState<'like' | 'dislike' | null>(null);
 
   const clientId = "7f91bc37-3173-4bec-98bc-ec27627624f1";
+
+  // 🔥 NEW: Track keyboard state
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const initialViewportHeightRef = useRef(window.innerHeight);
+
+  // 🔥 NEW: Detect keyboard open/close
+  useEffect(() => {
+    // Save initial viewport height
+    initialViewportHeightRef.current = window.innerHeight;
+
+    const handleResize = () => {
+      const currentHeight = window.visualViewport?.height || window.innerHeight;
+      const heightDiff = initialViewportHeightRef.current - currentHeight;
+      
+      // Keyboard dianggap terbuka jika viewport berkurang > 150px
+      const keyboardIsOpen = heightDiff > 150;
+      
+      if (keyboardIsOpen !== isKeyboardOpen) {
+        setIsKeyboardOpen(keyboardIsOpen);
+        console.log('🎹 Keyboard state:', keyboardIsOpen ? 'OPEN' : 'CLOSED');
+        
+        // Scroll to bottom ketika keyboard buka
+        if (keyboardIsOpen) {
+          setTimeout(() => {
+            scrollToBottom(false);
+          }, 300);
+        }
+      }
+    };
+
+    window.visualViewport?.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isKeyboardOpen]);
 
   const scrollToBottom = useCallback((smooth = false) => {
     if (chatContainerRef.current) {
@@ -46,31 +85,25 @@ export function ChatInterface() {
     }
   }, []);
 
-  // 🔥 FIXED: Prevent double session creation dengan promise caching
   const getOrCreateSession = async (): Promise<string> => {
-    // Jika sudah ada sessionId, return langsung
     if (sessionId) {
       console.log('✅ Using cached sessionId:', sessionId);
       return sessionId;
     }
 
-    // Jika sedang dalam proses pembuatan session, tunggu promise yang sama
     if (sessionCreationInProgressRef.current && sessionCreationPromiseRef.current) {
       console.log('⏳ Session creation already in progress, waiting...');
       return sessionCreationPromiseRef.current;
     }
 
-    // Tandai bahwa kita sedang membuat session
     sessionCreationInProgressRef.current = true;
     
-    // Buat promise dan simpan di ref
     const sessionPromise = (async () => {
       try {
         const storedSenderId = getSenderId();
 
         console.log('🔍 Checking for existing session...');
         
-        // Cek apakah sudah ada session aktif
         const { data: existingSession, error: sessionCheckError } = await supabase
           .from('dt_chat_sessions')
           .select('id')
@@ -80,7 +113,7 @@ export function ChatInterface() {
           .eq('source', 'landing_page')
           .order('created_at', { ascending: false })
           .limit(1)
-          .maybeSingle(); // 🔥 Gunakan maybeSingle() instead of single()
+          .maybeSingle();
 
         if (sessionCheckError) {
           throw sessionCheckError;
@@ -92,7 +125,6 @@ export function ChatInterface() {
           return existingSession.id;
         }
 
-        // Belum ada session, buat session baru
         console.log('✨ Creating new session...');
         const { data: newSession, error: createSessionError } = await supabase
           .from('dt_chat_sessions')
@@ -109,7 +141,6 @@ export function ChatInterface() {
           .single();
 
         if (createSessionError) {
-          // Jika error karena unique constraint (double insert), coba ambil lagi
           if (createSessionError.code === '23505') {
             console.log('⚠️ Duplicate session detected, fetching existing...');
             const { data: existingAfterError } = await supabase
@@ -135,13 +166,11 @@ export function ChatInterface() {
         setSessionId(newSession.id);
         return newSession.id;
       } finally {
-        // Reset flag setelah selesai
         sessionCreationInProgressRef.current = false;
         sessionCreationPromiseRef.current = null;
       }
     })();
 
-    // Simpan promise untuk reuse jika ada call bersamaan
     sessionCreationPromiseRef.current = sessionPromise;
     
     return sessionPromise;
@@ -158,12 +187,10 @@ export function ChatInterface() {
         }
       }
 
-      // Dapatkan session_id terlebih dahulu
       const currentSessionId = await getOrCreateSession();
 
       const currentOffset = isInitial ? 0 : offset;
       
-      // Query messages berdasarkan session_id
       const { data, error } = await supabase
         .from('dt_lp_chat_messages')
         .select('*')
@@ -290,11 +317,8 @@ export function ChatInterface() {
       setSending(true);
 
       const createdAt = new Date().toISOString();
-
-      // Dapatkan atau buat session (dengan protection dari double creation)
       const currentSessionId = await getOrCreateSession();
 
-      // Insert pesan user ke database
       const { data: insertedData, error } = await supabase
         .from('dt_lp_chat_messages')
         .insert([
@@ -317,7 +341,7 @@ export function ChatInterface() {
           scrollToBottom(true);
         }, 100);
         
-        setTimeout(() => {
+        waitingTimeoutRef.current = setTimeout(() => {
           setWaitingForAgent(true);
           setTimeout(() => {
             scrollToBottom(true);
@@ -325,7 +349,6 @@ export function ChatInterface() {
         }, 300);
       }
 
-      // Kirim ke N8N
       const n8nUrl = import.meta.env.VITE_N8N_WEBHOOK_URL;
       const authToken = import.meta.env.VITE_AUTH_WEBHOOK_TOKEN;
       const hmacSecret = import.meta.env.VITE_HMAC_SECRET;
@@ -372,6 +395,7 @@ export function ChatInterface() {
         });
 
         if (!response.ok) {
+          if (waitingTimeoutRef.current) clearTimeout(waitingTimeoutRef.current);
           setWaitingForAgent(false);
           
           let errorMessage = 'Mohon maaf terjadi kesalahan pada server kami.';
@@ -406,13 +430,16 @@ export function ChatInterface() {
         setTimeout(async () => {
           console.log('⏰ 5 seconds passed, refreshing latest messages now...');
           await refreshLatestMessages();
+          if (waitingTimeoutRef.current) clearTimeout(waitingTimeoutRef.current);
           setWaitingForAgent(false);
         }, 5000);
       } else {
+        if (waitingTimeoutRef.current) clearTimeout(waitingTimeoutRef.current);
         setWaitingForAgent(false);
       }
     } catch (error) {
       console.error('Error sending message:', error);
+      if (waitingTimeoutRef.current) clearTimeout(waitingTimeoutRef.current);
       setWaitingForAgent(false);
       
       try {
@@ -425,7 +452,6 @@ export function ChatInterface() {
             session_id: currentSessionId,
             role: 'agent',
             message: 'Mohon maaf, terjadi kesalahan dalam mengirim pesan. Silakan coba lagi.',
-            created_at: new Date().toISOString(),
           }]);
         
         setTimeout(() => {
@@ -449,7 +475,6 @@ export function ChatInterface() {
     }
   };
 
-  // Real-time subscription
   useEffect(() => {
     if (isSubscribedRef.current || !sessionId) return;
     isSubscribedRef.current = true;
@@ -507,7 +532,6 @@ export function ChatInterface() {
     };
   }, [sessionId, scrollToBottom]);
 
-  // 🔥 FIXED: Initial load dengan cleanup
   useEffect(() => {
     let isMounted = true;
     
@@ -524,7 +548,6 @@ export function ChatInterface() {
     };
   }, []);
 
-  // Auto-scroll effects
   useEffect(() => {
     if (isInitialLoadRef.current && !loading) {
       scrollToBottom();
@@ -552,14 +575,27 @@ export function ChatInterface() {
   }, [waitingForAgent, scrollToBottom]);
 
   return (
-    <div className="h-screen flex flex-col bg-white">
+    <div 
+      className="h-screen flex flex-col bg-white"
+      style={{
+        // 🔥 FIX: Prevent viewport zoom on input focus
+        height: '100dvh', // Dynamic viewport height (support keyboard)
+        maxHeight: '100dvh',
+        overflow: 'hidden'
+      }}
+    >
       <ChatHeader />
 
       <div
         ref={chatContainerRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50"
-        style={{ overflowAnchor: 'none' }}
+        style={{ 
+          overflowAnchor: 'none',
+          // 🔥 FIX: Prevent scroll bounce & zoom
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain'
+        }}
       >
         {loadingMore && (
           <div className="flex justify-center py-2">
@@ -583,7 +619,6 @@ export function ChatInterface() {
             
             {waitingForAgent && (
               <div className="flex gap-2 mb-3 sm:mb-4 justify-start animate-in fade-in duration-300">
-                {/* Avatar Agent - Disamakan persis dengan ChatBubble */}
                 <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white flex items-center justify-center flex-shrink-0 overflow-hidden shadow-sm border border-gray-100">
                   <img 
                     src="/assets/profile-vera.png" 
@@ -593,7 +628,6 @@ export function ChatInterface() {
                 </div>
 
                 <div className="flex flex-col gap-1 max-w-[75%] sm:max-w-[70%]">
-                  {/* Bubble Loading dengan Radius dan Warna Agent */}
                   <div className="bg-blue-500 px-3 py-2 sm:px-4 sm:py-3 shadow-sm rounded-[18px] rounded-tl-[4px] w-fit">
                     <div className="flex gap-1.5 items-center h-5">
                       <div 
@@ -617,7 +651,19 @@ export function ChatInterface() {
         )}
       </div>
 
-      <ChatInput onSendMessage={sendMessage} disabled={sending} />
+      {/* 🔥 WRAPPER untuk ChatInput agar stay at bottom */}
+      <div 
+        className="flex-shrink-0"
+        style={{
+          // Prevent input area dari ikut scroll
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 10
+        }}
+      >
+        <ChatInput onSendMessage={sendMessage} disabled={sending} />
+      </div>
+
       {selectedFeedbackType && (
         <FeedbackModal
           isOpen={showFeedbackModal}
