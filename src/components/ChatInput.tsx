@@ -11,16 +11,24 @@ export function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 🔥 FIX: Auto-resize textarea
+  // 🔥 FIX: Auto-resize textarea dengan scroll terkontrol
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
-    // Reset height untuk recalculate
+    // Reset height dulu supaya scrollHeight terbaca akurat
     textarea.style.height = 'auto';
     
-    // Set new height berdasarkan content (max 120px ~ 5 lines)
-    const newHeight = Math.min(textarea.scrollHeight, 120);
-    textarea.style.height = `${newHeight}px`;
+    const scrollHeight = textarea.scrollHeight;
+    const maxHeight = 100; // Sesuaikan dengan batas yang kamu mau
+
+    if (scrollHeight > maxHeight) {
+      textarea.style.height = `${maxHeight}px`;
+      textarea.style.overflowY = 'auto'; // Munculkan scroll jika lewat batas
+    } else {
+      textarea.style.height = `${scrollHeight}px`;
+      textarea.style.overflowY = 'hidden'; // Sembunyikan scroll jika masih pendek
+    }
   }, [message]);
 
   // 🔥 FIX: Prevent zoom on focus (iOS Safari)
@@ -81,24 +89,21 @@ export function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
               placeholder="Ketik pesan..."
               disabled={disabled}
               rows={1}
+              maxLength={500}
               className="w-full px-4 py-3 pr-12 rounded-2xl border border-gray-300 
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                       resize-none overflow-y-auto
-                       disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                      resize-none transition-[height] duration-100
+                      disabled:bg-gray-100 disabled:cursor-not-allowed"
               style={{
                 minHeight: '48px',
-                maxHeight: '120px',
-                // 🔥 CRITICAL: Prevent zoom on iOS
-                fontSize: '16px', // Must be >= 16px to prevent zoom!
+                // maxHeight tetap didefinisikan di CSS sebagai jaga-jaga
+                maxHeight: '100px', 
+                fontSize: '16px',
                 lineHeight: '1.5',
-                // 🔥 Prevent text selection zoom
                 WebkitTapHighlightColor: 'transparent',
-                // 🔥 Prevent auto-zoom
-                WebkitTextSizeAdjust: '100%'
               }}
             />
           </div>
-          
           <button
             type="submit"
             disabled={!message.trim() || disabled}
@@ -108,7 +113,7 @@ export function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
                      focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             aria-label="Send message"
           >
-            <Send className="w-5 h-5" />
+            <Send className="w-5 h-5 sm:w-4 sm:h-4" />
           </button>
         </div>
       </form>
